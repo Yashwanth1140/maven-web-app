@@ -1,0 +1,146 @@
+Lambda Code
+------------
+import boto3
+from uuid import uuid4
+
+def lambda_handler(event, context):
+    s3 = boto3.client('s3')
+    dynamodb = boto3.resource('dynamodb')
+
+    if 'Records' in event:
+        # Iterate over each record in the event
+        for record in event['Records']:
+            bucket_name = record['s3']['bucket']['name']
+            object_key = record['s3']['object']['key']
+            size = record['s3']['object'].get('size', -1)
+            event_name = record.get('eventName', 'Unknown')
+            event_time = record.get('eventTime', 'Unknown')
+
+            dynamoTable = dynamodb.Table('newtable')
+            dynamoTable.put_item(
+                Item={
+                    'unique': str(uuid4()),
+                    'Bucket': bucket_name,
+                    'Object': object_key,
+                    'Size': size,
+                    'EventName': event_name,
+                    'EventTime': event_time
+                }
+            )
+    else:
+        print("No 'Records' key found in the event.")
+
+
+Lambda Processing For SQS
+--------------------------
+def lambda_handler(event, context):
+
+    for record in event['Records']:
+        print("Message received from SQS:")
+        print(record['body'])
+
+    return {
+        'statusCode': 200,
+        'body': 'Message processed successfully'
+    }
+
+
+S3->SNS->Email Policy (Automatically Configured (Optional))
+-----------------------------------------------------------
+IN SNS Policy Edit
+{
+  "Sid": "Example SNS topic policy",
+  "Effect": "Allow",
+  "Principal": {
+    "Service": "s3.amazonaws.com"
+  },
+  "Action": [
+    "SNS:Publish"
+  ],
+  "Resource": "SNS topic ARN",
+  "Condition": {
+    "ArnLike": {
+      "aws:SourceArn": "s3 bucket ARN"
+    },
+    "StringEquals": {
+      "aws:SourceAccount": "account id"
+    }
+  }
+}
+
+S3->SNS->SQS->Lambda Policies (Automatically Configured (Optional))
+-------------------------------------------------------------------
+In SNS Policy Edit
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Allow-S3-Publish",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "s3.amazonaws.com"
+      },
+      "Action": "SNS:Publish",
+      "Resource": "REPLACE_WITH_SNS_TOPIC_ARN",
+      "Condition": {
+        "ArnLike": {
+          "aws:SourceArn": "REPLACE_WITH_S3_BUCKET_ARN"
+        },
+        "StringEquals": {
+          "aws:SourceAccount": "REPLACE_WITH_ACCOUNT_ID"
+        }
+      }
+    }
+  ]
+}
+
+IN SQS Policy
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Allow-SNS-SendMessage",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "sns.amazonaws.com"
+      },
+      "Action": "sqs:SendMessage",
+      "Resource": "REPLACE_WITH_SQS_QUEUE_ARN",
+      "Condition": {
+        "ArnEquals": {
+          "aws:SourceArn": "REPLACE_WITH_SNS_TOPIC_ARN"
+        }
+      }
+    }
+  ]
+}
+
+Lambda Policy -> Lab Role
+
+
+Lambda + LEX (Sample)
+---------------------
+def lambda_handler(event, context):
+
+    slots = event['sessionState']['intent']['slots']
+    name = slots['Name']['value']['interpretedValue']
+    city = slots['City']['value']['interpretedValue']
+
+    message = f"Hello {name}, welcome to {city}!"
+    return {
+        "sessionState": {
+            "dialogAction": {
+                "type": "Close"
+            },
+            "intent": {
+                "name": "GreetingIntent",
+                "state": "Fulfilled"
+            }
+        },
+        "messages": [
+            {
+                "contentType": "PlainText",
+                "content": message
+            }
+        ]
+    }
