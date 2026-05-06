@@ -1,2 +1,964 @@
 hello
 made another change
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Part 1 — SNS: Create Topic & Send Email
+What we're doing: Setting up a pub-sub notification that emails you when triggered.
+Step 1: Create SNS Topic
+
+Login → AWS Console → Search SNS
+Left panel → Topics → Create topic
+Configure: Type = Standard, Name = MyEmailTopic
+Click Create topic
+
+Step 2: Create Email Subscription
+
+Open your topic → Subscriptions tab → Create subscription
+Protocol = Email, Endpoint = your email address
+Click Create subscription
+
+Step 3: Confirm Subscription
+
+Check your inbox → Click "Confirm subscription" in the AWS email
+
+Step 4: Publish a Test Message
+
+Open your SNS topic → Click Publish message
+Subject = Test Mail, Body = Hello this is SNS test
+Click Publish message → You'll receive the email ✅
+
+
+Part 2 — S3 → SNS → Email
+What we're doing: Automatically email yourself whenever a file is uploaded to S3.
+Step 1: Create S3 Bucket
+
+Name = my-upload-bucket-2026, same region as SNS topic → Create bucket
+
+Step 2: Reuse or create MyEmailTopic SNS (with confirmed email subscription)
+Step 3: Update SNS Access Policy
+
+Open SNS Topic → Access policy → Edit
+Add a policy statement allowing S3 (s3.amazonaws.com) to publish to the SNS topic (replace ARNs with your actual SNS ARN, S3 bucket ARN, and Account ID)
+
+Step 4: Configure S3 Event Notification
+
+Open your S3 bucket → Properties → Event notifications → Create event notification
+Event name = UploadNotification
+Event types = All object create events
+Destination = SNS topic → choose MyEmailTopic
+Save changes
+
+Step 5: Test
+
+Upload any file to the S3 bucket → You'll receive an email notification ✅
+
+
+Part 3 — SQS: Create Queue & Send/Receive Message
+What we're doing: Manually test SQS as a message queue.
+Step 1: Create SQS Queue
+
+AWS Console → Search SQS → Create queue
+Type = Standard, Name = MyQueue → Create queue
+
+Step 2: Send a Message
+
+Open MyQueue → Send and receive messages
+Message body = Hello this is SQS test message
+Click Send message
+
+Step 3: Receive the Message
+
+Same page → Click Poll for messages
+Your message appears → optionally click Delete message after reading ✅
+
+
+Part 4 — Full Pipeline: S3 → SNS → SQS → Lambda ⭐
+What we're doing: Building a complete serverless event-driven architecture — the real cloud pattern.
+S3 (file upload) → SNS Topic → SQS Queue → Lambda (processes it)
+Step 1: Create S3 Bucket
+
+Name = mys3eventbucket123 → Create bucket
+
+Step 2: Create SNS Topic
+
+Name = MyS3SNSTopic, Type = Standard → Create topic (copy the ARN)
+
+Step 3: Create SQS Queue
+
+Name = MyS3Queue, Type = Standard → Create queue (copy the Queue ARN)
+
+Step 4: Subscribe SQS to SNS
+
+Open MyS3SNSTopic → Create subscription
+Protocol = Amazon SQS, Endpoint = MyS3Queue
+Create subscription
+
+Step 5: Update SQS Access Policy
+
+Open MyS3Queue → Access Policy → Edit
+Add a statement allowing sns.amazonaws.com to SQS:SendMessage on your queue (replace ARNs)
+
+Step 6: Update SNS Access Policy
+
+Open MyS3SNSTopic → Edit access policy
+Add a statement allowing s3.amazonaws.com to SNS:Publish (replace SNS ARN, S3 bucket ARN, Account ID)
+
+Step 7: Configure S3 Event Notification
+
+Open mys3eventbucket123 → Properties → Event notifications → Create event notification
+Event name = S3UploadEvent, Event type = All object create events
+Destination = SNS Topic → MyS3SNSTopic
+Save changes
+
+Step 8: Test the Architecture
+
+Upload any file (e.g., test.txt) to the S3 bucket
+
+Step 9: Verify Message in SQS
+
+Open MyS3Queue → Send and receive messages → Poll for messages
+You'll see the S3 event notification message ✅
+
+Step 10: Create Lambda as Consumer
+
+AWS Console → Lambda → Create Function
+Author from scratch, Name = SQSConsumerFunction, Runtime = Python 3.x
+Create function
+
+Add SQS Trigger:
+
+Open SQSConsumerFunction → Add Trigger → Select SQS → Choose MyS3Queue
+Add
+
+Lambda Code (replace default code with):
+pythondef lambda_handler(event, context):
+    for record in event['Records']:
+        print("Message received from SQS:")
+        print(record['body'])
+    return {
+        'statusCode': 200,
+        'body': 'Message processed successfully'
+    }
+Click Deploy ✅
+
+Final Result
+When a file is uploaded to S3:
+
+S3 sends a notification → SNS
+SNS forwards the message → SQS
+SQS stores it reliably
+Lambda automatically reads and processes the message (logs it / can trigger further actions)
+
+This is the classic serverless event-driven pipeline pattern used widely in real cloud applications — exactly the kind of thing that shows up in interviews too! 🎯
+
+
+
+Services involved: S3 + Lambda (Python) + DynamoDB
+
+Step-by-Step Procedure
+Step 1: Create / Login to AWS Account
+
+Go to https://aws.amazon.com and sign in to your AWS Management Console.
+
+Step 2: Open AWS Lambda Console
+
+In the search bar, type Lambda and open the service.
+
+Step 3: Create a New Lambda Function
+
+Click Create function
+Choose Author from scratch
+Function name → S3ToDynamoDB
+Runtime → Python 3.x
+Under Permissions → create a new role with basic Lambda permissions (make sure it also has access to S3 and DynamoDB)
+Click Create function
+
+Step 4: Create a DynamoDB Table
+
+Before writing the code, go to DynamoDB → Create table
+Table name → newtable2
+Partition key → unique (String)
+Click Create
+
+Step 5: Upload / Write the Lambda Code
+Replace the default code with this:
+pythonimport boto3
+from uuid import uuid4
+
+def lambda_handler(event, context):
+    dynamodb = boto3.resource('dynamodb')
+    dynamoTable = dynamodb.Table('newtable2')
+
+    if 'Records' in event:
+        for record in event['Records']:
+            bucket_name = record['s3']['bucket']['name']
+            object_key  = record['s3']['object']['key']
+            size        = record['s3']['object'].get('size', -1)
+            event_name  = record['eventName']
+            event_time  = record['eventTime']
+
+            dynamoTable.put_item(
+                Item={
+                    'unique':    str(uuid4()),
+                    'Bucket':    bucket_name,
+                    'Object':    object_key,
+                    'Size':      size,
+                    'Event':     event_name,
+                    'EventTime': event_time
+                }
+            )
+    else:
+        print("No S3 event received")
+
+    return {
+        "statusCode": 200,
+        "body": "Data stored in DynamoDB"
+    }
+What this code does: Each time S3 triggers this function, it loops through the event records, extracts the bucket name, file name, size, event type & timestamp, and stores everything as a new row in DynamoDB with a unique ID.
+Step 6: Configure the S3 Trigger
+
+In the Lambda function page, click Add trigger
+Select S3 as the trigger type
+Choose the S3 bucket you want to watch
+Event type → All object create events
+Click Add
+
+Step 7: Configure Environment Variables (Optional)
+
+If you need to pass extra config (like table names, region), go to Configuration tab → Environment variables → Add them there
+
+Step 8: Test Your Function
+
+Click the Test button in the Lambda console
+Create a sample test event that simulates an S3 upload event (AWS provides a built-in S3 Put template)
+Run it and check if DynamoDB gets a new record
+
+Step 9: Deploy
+
+Click the Deploy button to save and publish your function
+
+Step 10: Monitor Execution
+
+Go to the Monitoring tab in the Lambda console
+View CloudWatch logs to see execution output and debug any errors
+
+
+LOADBALENCERS 
+
+Part A — Elastic Load Balancer (ALB)
+Step 1: Launch Two EC2 Instances
+Instance 1 (webserver-1):
+
+Go to EC2 Console → Launch Instance
+Name → webserver-1
+AMI → Amazon Linux 2
+Instance type → t2.micro
+Storage → default
+Security Group → Allow SSH (port 22) from your IP, HTTP (port 80) from anywhere (0.0.0.0/0)
+Launch with your key pair
+
+After connecting via SSH, run:
+bashyum update -y
+yum install httpd -y
+systemctl start httpd
+systemctl enable httpd
+echo "This is Server 1" > /var/www/html/index.html
+Instance 2 (webserver-2): Repeat the same steps, but with:
+bashecho "This is Server 2" > /var/www/html/index.html
+
+Step 2: Create the Application Load Balancer (ALB)
+2.1 — Create a Security Group for the Load Balancer
+
+EC2 → Security Groups → Create Security Group
+Name → lb-sg
+Inbound rules → Allow HTTP (80) from anywhere, optionally HTTPS (443)
+
+2.2 — Create the Load Balancer
+
+EC2 → Load Balancers → Create Load Balancer → Application Load Balancer
+Configure:
+
+Name → my-alb
+Scheme → Internet-facing
+IP address type → IPv4
+Listener → HTTP (port 80)
+
+
+
+2.3 — Configure Availability Zones
+
+Select the default VPC where your EC2 instances are
+Select two or more subnets (one per AZ for resilience)
+
+2.4 — Configure Security Groups
+
+Choose lb-sg created above
+
+2.5 — Create a Target Group
+
+Create new target group:
+
+Name → web-servers-tg
+Target type → Instance
+Protocol → HTTP, Port → 80
+Health check path → / (default)
+
+
+Register Targets:
+
+Select webserver-1 and webserver-2
+Click Include as pending → Register
+
+
+
+2.6 — Review & Create
+
+Review all settings → Create Load Balancer
+AWS takes a few minutes to provision it
+
+
+Step 3: Verify the Load Balancer
+
+Go to Load Balancers → Select your ALB → copy the DNS name
+
+Looks like: my-alb-123456.us-east-1.elb.amazonaws.com
+
+
+Paste it in a browser → you'll see either "This is Server 1" or "This is Server 2"
+Refresh multiple times → the Load Balancer alternates between both instances ✅
+
+Step 4: Check Health (Optional)
+
+Go to Target Groups → web-servers-tg → Targets
+Both instances should show status = healthy
+If unhealthy, check your security group rules and Apache setup
+
+
+Part B — Auto Scaling Group (ASG)
+Step 1: Create an AMI from your EC2 Instance
+
+EC2 → Instances → select your configured webserver
+Actions → Image and Templates → Create Image
+Image name → my-webserver-AMI
+Click Create Image → wait for status to become available
+
+This AMI is the "template snapshot" that Auto Scaling will use to spin up new identical servers.
+
+Step 2: Create a Launch Template
+
+EC2 → Launch Templates → Create Launch Template
+Configure:
+
+Name → my-launch-template
+AMI → select my-webserver-AMI (from Step 1)
+Instance type → t2.micro
+Key pair → your existing key pair
+Security group → lb-sg (allow HTTP 80)
+User data → optional (already baked into AMI)
+
+
+Click Create Launch Template ✅
+
+
+Step 3: Create the Auto Scaling Group (ASG)
+
+EC2 → Auto Scaling Groups → Create Auto Scaling Group
+Configure:
+
+Name → webserver-asg
+Launch Template → my-launch-template, Version 1
+
+
+Network Settings:
+
+VPC → Default VPC
+Availability Zones → select all subnets (for high availability)
+Load Balancer → Enable "Attach to existing load balancer" → select your ALB
+Health Check → HTTP, Grace Period → 300 seconds
+
+
+Group Size:
+
+Desired capacity → 2
+Minimum capacity → 1
+Maximum capacity → 4
+
+
+Click Next → Review → Create Auto Scaling Group ✅
+
+
+Step 4: Verify Auto Scaling + Load Balancer
+
+Go to Load Balancers → your ALB → Instances / Target Group → you'll see 2 healthy instances
+Go to Auto Scaling Group → Instances → you may see up to 4 if scaling triggers
+
+Test Auto-Recovery:
+
+Manually terminate one instance
+Within seconds, ASG detects it and launches a replacement automatically
+Load Balancer resumes routing traffic to all healthy instances ✅
+
+Step 5: Test the Load Balancer
+
+Copy the ALB DNS name
+Open in browser → see your web page
+Refresh multiple times → traffic alternates between instances ✅
+
+ELASTICBEANSTACK 
+
+Prerequisites
+
+A web application file ready to upload — either a .war file (Java/Tomcat) or a .zip file (Node.js, Python, PHP, etc.)
+
+
+Step-by-Step Procedure
+Step 1: Open Elastic Beanstalk
+
+Login to AWS Console
+Under the Compute section → search for Elastic Beanstalk
+Click Create Application
+
+
+Step 2: Create Application
+
+Enter Application Name → e.g., MyApp
+Add a description (optional)
+Click Create
+
+
+Step 3: Create Environment
+
+Click Create Environment
+Choose environment tier → Web Server Environment (for web apps)
+Click Select
+
+
+Step 4: Configure Environment
+
+Enter an Environment Name (e.g., MyApp-env)
+Choose your Platform based on your app type:
+
+App TypePlatform to chooseJava appTomcatNode.js appNode.jsPython appPythonPHP appPHP
+
+Under Application Code:
+
+Select Upload your code
+Upload your .war or .zip file
+
+
+
+
+Step 5: Configure Service Access
+
+Service Role → Select existing → LabRole
+EC2 Key Pair → Optional (needed only if you want SSH access to the instances)
+EC2 Instance Profile → Select → e.g., LabInstanceProfile
+
+
+Step 6: Configure Network
+
+VPC → Default VPC is fine
+Subnets → Select available subnets
+Public IP → Enable (so your app is accessible from the internet)
+
+
+Step 7: Instance & Scaling Setup
+
+Instance type → t2.micro (free tier eligible)
+Set scaling limits:
+
+Min instances → 1
+Max instances → 2 (or more based on your needs)
+
+
+Load Balancer → Enable (recommended for production-like setup)
+
+
+Step 8: Review & Create
+
+Click Review → go through all your settings
+Click Create
+AWS now begins provisioning everything automatically — this takes a few minutes ⏳
+
+
+What AWS Auto-Provisions Behind the Scenes
+When you click Create, Beanstalk automatically sets up:
+ResourceWhat it doesEC2 Instance(s)Runs your applicationLoad BalancerDistributes traffic across instancesAuto Scaling GroupScales instances up/down based on loadSecurity GroupsControls inbound/outbound traffic rules
+You don't create any of these manually — Beanstalk handles it all.
+
+Access Your Application
+After deployment completes:
+
+You'll receive a public URL (domain link) like:
+http://myapp-env.eba-xxxxxx.us-east-1.elasticbeanstalk.com
+Open it in a browser → your app is live ✅
+
+
+Updating Your Application (Future Deployments)
+Whenever you make changes to your code:
+
+Go to your Beanstalk Environment
+Click Upload and Deploy
+Upload the new version of your .war / .zip
+Beanstalk deploys the update with zero manual steps
+
+
+
+Amazon LEX
+
+Step 1: Open Amazon Lex
+
+Login to AWS Console → https://console.aws.amazon.com
+In the top search bar → type Lex
+Click Amazon Lex from the results
+You'll land on the Amazon Lex V2 console
+Click Create bot
+
+
+Step 2: Create the Bot
+
+On the "Create bot" screen → choose Create a blank bot
+Fill in the details:
+
+Bot name → HotelBookingBot
+Description → (optional, e.g., "Hotel booking chatbot")
+IAM role → select Create a role with basic Amazon Lex permissions (auto-creates it)
+COPPA → Select No (this is a lab/test bot)
+
+
+Click Next
+Language → Select English (US)
+Voice interaction → optional, leave as default (Ivy or None)
+Click Done
+
+You'll now be inside the bot editor.
+
+Step 3: Create an Intent
+An Intent = the user's goal. Here the goal is to book a hotel.
+
+In the left panel → click Intents
+Click Add intent → Create intent
+Intent name → BookHotel
+Click Create
+
+You're now inside the BookHotel intent editor.
+
+Step 4: Add Sample Utterances
+Utterances are the phrases a user might type to trigger this intent. The more you add, the smarter the bot.
+
+Scroll down to the Sample utterances section
+Click the text box and add each of these one by one (press Enter or click the + after each):
+
+I want to book a hotel
+Book a room
+Reserve hotel
+I need a room
+
+
+These phrases train Lex to recognise the user's booking intent
+
+
+Step 5: Add Slot — Age
+Slots are like form fields. The bot asks a question and stores the user's answer.
+
+Scroll down to the Slots section
+Click Add slot
+Fill in:
+
+Slot name → age
+Slot type → AMAZON.Number
+Prompt → What is your age?
+
+
+Check Required checkbox
+Click Save slot
+
+Add Conditional Logic on Age (Under 18 block)
+
+Click on the age slot to open its settings
+Go to Advanced options
+Scroll to Slot capture → Success response → Conditional branching
+Click Add condition
+Set:
+
+Condition → {age} < 18
+Response → You are not eligible for hotel booking.
+
+
+This means if age is below 18, the bot stops and responds with that message
+Click Save
+
+
+Step 6: Add Remaining Slots
+Slot 2 — Location (City)
+
+Click Add slot
+Fill in:
+
+Slot name → location
+Slot type → AMAZON.City
+Prompt → Which city do you want?
+
+
+Mark as Required
+Click Save slot
+
+Slot 3 — Check-in Date
+
+Click Add slot
+Fill in:
+
+Slot name → checkin
+Slot type → AMAZON.Date
+Prompt → What is your check-in date?
+
+
+Mark as Required
+Optional — add a Retry prompt: Please provide a valid date (e.g., 2026-03-25)
+Click Save slot
+
+Slot 4 — Number of Nights
+
+Click Add slot
+Fill in:
+
+Slot name → nights
+Slot type → AMAZON.Number
+Prompt → How many nights will you stay?
+
+
+Mark as Required
+Click Save slot
+
+
+Step 7: Create a Custom Slot Type (Room Type)
+For room type, there's no built-in AMAZON type, so you create a custom one.
+
+In the left panel → click Slot types
+Click Add slot type → Add blank slot type
+Slot type name → RoomType
+Under Slot type values, add each value one by one:
+
+Single
+Double
+Suite
+
+
+Click Save slot type
+
+Now use RoomType in your Intent
+
+Go back to Intents → click BookHotel
+Scroll to Slots → Click Add slot
+Fill in:
+
+Slot name → RoomType
+Slot type → RoomType (your custom type)
+Prompt → What type of room do you want?
+
+
+Mark as Required
+Click Save slot
+
+
+Step 8 (Bonus): Add Response Card with Quick-Reply Buttons
+Instead of making the user type the room type, you can show clickable buttons.
+
+Click on the RoomType slot
+Go to Slot prompts → click More prompt options
+Click Add → Add card group
+Fill in:
+
+Card title → Select Room Type
+
+
+Click Add button and add three buttons:
+
+Button label Single → value Single
+Button label Double → value Double
+Button label Suite → value Suite
+
+
+Click Save
+
+The user will now see clickable buttons instead of having to type.
+
+Step 9: Configure Responses
+
+Scroll up to Initial response (at the top of the intent)
+
+Add → Welcome to Hotel Booking! What is your age?
+
+
+Scroll down to Confirmation prompt section
+
+Confirm → Do you want to confirm booking in {location} for {nights} nights?
+Decline response → Booking cancelled. Have a great day!
+
+
+Scroll to Fulfillment → On successful fulfillment
+
+Add response → Booking confirmed. See you in {location}!
+
+
+Click Save intent
+
+
+Step 10: Build & Test the Bot
+Build
+
+Click the Build button (top right of the intent page)
+Wait for the build to complete — you'll see a green "Build successful" message (takes ~30 seconds)
+
+Test
+
+Click Test (top right) → a chat panel opens on the right side
+Type: Book a hotel
+The bot will walk through the conversation:
+
+User: Book a hotel
+Bot:  What is your age?
+User: 25
+Bot:  Which city do you want?
+User: Hyderabad
+Bot:  What is your check-in date?
+User: Tomorrow
+Bot:  How many nights will you stay?
+User: 2
+Bot:  What type of room do you want?
+      [Single] [Double] [Suite]
+User: Double
+Bot:  Do you want to confirm booking in Hyderabad for 2 nights?
+User: Yes
+Bot:  Booking confirmed. See you in Hyderabad!
+Test the age block too:
+User: Book a hotel
+Bot:  What is your age?
+User: 15
+Bot:  You are not eligible for hotel booking.
+
+
+
+
+Part A — GUI Access
+Step 1: Login as Root & Open IAM
+
+Login to AWS Console as Root User
+In the search bar → type IAM
+Click IAM under "Security, Identity & Compliance"
+In the left panel → click Users
+Click Create user
+
+
+Step 2: Set User Details
+
+User name → S3_Specialist (or any name)
+Check the box → "Provide user access to the AWS Management Console"
+Select → Custom password → set a password you'll remember
+Uncheck "User must create a new password at next sign-in" (for lab convenience)
+Click Next
+
+
+Step 3: Set Permissions
+
+Select → "Attach policies directly"
+In the search box → type AmazonS3FullAccess
+Check the box next to AmazonS3FullAccess
+Click Next
+
+
+Step 4: Review & Create
+
+Review all settings
+Click Create user
+On the confirmation page → click Download .csv file
+
+This file contains the sign-in URL, username, and password — save it!
+
+
+Click Return to users list
+
+
+Step 5: Get Your Account ID & Sign Out
+
+Click your account name (top-right corner)
+Copy the 12-digit Account ID (e.g., 352917280532)
+Click Sign out
+
+
+Step 6: Login as the IAM User
+
+Go to → https://signin.aws.amazon.com/console
+Select → IAM user
+Enter your Account ID (12-digit number)
+Click Next
+Enter the IAM Username and Password from the .csv file
+Click Sign in
+
+
+Step 7: Test the Restrictions
+Test 1 — EC2 (Should FAIL ❌)
+
+Search EC2 in the console
+Try to view instances
+You'll see "API Error" or "Access Denied"
+✅ This proves the user is restricted — no EC2 permission was given
+
+Test 2 — S3 (Should SUCCEED ✅)
+
+Search S3 in the console
+Click Create bucket
+Give it a name → Click Create bucket
+It works! ✅ Because AmazonS3FullAccess was attached
+
+
+Part B — CLI Access (Terminal / CMD)
+🧠 What Are We Doing?
+Instead of using the browser, you access AWS from your own computer's terminal using security keys. Same IAM permissions apply — S3 works, EC2 is blocked.
+
+Step 1: Generate Access Keys (Back as Admin/Root)
+
+Login back as Root/Admin
+Go to IAM → Users → click your user (S3_Specialist)
+Click the Security credentials tab
+Scroll down to Access keys section
+Click Create access key
+Select → Command Line Interface (CLI)
+Check the acknowledgment box → Click Next
+Click Create access key
+Download the .csv file immediately!
+
+Contains: Access Key ID and Secret Access Key
+⚠️ You can NEVER see the Secret Key again after closing this page — download it now!
+
+
+
+
+Step 2: Install AWS CLI on Your Computer
+For Windows:
+
+Download the installer from: https://awscli.amazonaws.com/AWSCLIV2.msi
+Run the .msi installer → click through Next → Finish
+Open CMD and type aws --version to confirm it installed
+
+For Mac:
+bashcurl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
+sudo installer -pkg AWSCLIV2.pkg -target /
+For Linux:
+bashcurl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+Step 3: Configure AWS CLI
+
+Open CMD (Windows) or Terminal (Mac/Linux)
+Type:
+
+bashaws configure
+
+It will ask 4 things — fill from your .csv:
+
+AWS Access Key ID:     PASTE_ACCESS_KEY_ID_HERE
+AWS Secret Access Key: PASTE_SECRET_ACCESS_KEY_HERE
+Default region name:   ap-south-1
+Default output format: json
+
+For region: use ap-south-1 (Mumbai) if you created resources there, or us-east-1 (N. Virginia)
+
+
+Step 4: Test CLI Permissions
+Test 1 — EC2 (Should FAIL ❌)
+bashaws ec2 describe-instances
+Result: AccessDenied error — proves the IAM policy is working via CLI too
+Test 2 — S3 List Buckets (Should SUCCEED ✅)
+bashaws s3 ls
+Result: Lists all your S3 buckets
+Test 3 — S3 Create Bucket (Should SUCCEED ✅)
+bashaws s3 mb s3://your-unique-bucket-name-2026
+Result: make_bucket: your-unique-bucket-name-2026
+Then go to the AWS Console → S3 → you'll see the bucket created from CLI! ✅
+
+
+Step 1: Create an IAM Role
+
+Go to AWS Console → search IAM
+Left panel → click Roles
+Click Create role
+Trusted entity type → Select AWS service
+Use case → Select EC2
+Click Next
+
+
+Step 2: Attach Permission Policy
+
+In the search box → type AmazonS3FullAccess
+Check the box next to AmazonS3FullAccess
+Click Next
+
+
+Step 3: Name the Role
+
+Role name → EC2-S3-Role
+Review → Click Create role ✅
+
+
+Step 4: Attach the Role to Your EC2 Instance
+
+Go to AWS Console → search EC2
+Click Instances in the left panel
+Select your running EC2 instance (checkbox on the left)
+Click Actions (top menu)
+Hover over → Security
+Click → Modify IAM role
+In the dropdown → select EC2-S3-Role
+Click Update IAM role ✅
+
+
+Step 5: SSH Into the Instance & Verify
+Connect to your EC2 instance via SSH (same as always):
+bashssh -i your-key.pem ec2-user@YOUR_EC2_PUBLIC_IP
+Once inside, run these commands — no aws configure needed!
+Test 1 — S3 List (Should SUCCEED ✅)
+bashaws s3 ls
+Result: Lists all your S3 buckets — works automatically!
+Test 2 — Create S3 Bucket (Should SUCCEED ✅)
+bashaws s3 mb s3://bucket-from-ec2-role
+Result: Bucket created ✅
+Test 3 — EC2 Describe (Should FAIL ❌)
+bashaws ec2 describe-instances
+Result: UnauthorizedOperation — no EC2 permission in the role ✅
